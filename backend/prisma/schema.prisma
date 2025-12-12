@@ -1,0 +1,191 @@
+// --------------------------------------------------
+//  Prisma Schema for Facebook-like Social Network
+// --------------------------------------------------
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// -------------------------
+// User
+// -------------------------
+model User {
+  id            String          @id @default(cuid())
+  name          String
+  email         String          @unique
+  username      String?         @unique
+  password      String
+  bio           String?
+  location      String?
+  website       String?
+  avatarUrl     String?
+  coverUrl      String?
+  createdAt     DateTime        @default(now())
+
+  posts                Post[]
+  comments             Comment[]
+  likes                Like[]
+  notifications        Notification[]       @relation("NotificationRecipient")
+  sentNotifications    Notification[]       @relation("NotificationSender")
+  messagesSent         Message[]            @relation("MessagesSent")
+  messagesRecv         Message[]            @relation("MessagesReceived")
+  friendships1         Friendship[]         @relation("Friends1")
+  friendships2         Friendship[]         @relation("Friends2")
+  groups               GroupMember[]
+  adminGroups          Group[]
+  pages                Page[]
+}
+
+// -------------------------
+// Post
+// -------------------------
+model Post {
+  id        String     @id @default(cuid())
+  content   String?
+  authorId  String
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  author        User           @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  media         Media[]
+  comments      Comment[]
+  likes         Like[]
+  notifications Notification[]
+  page          Page?          @relation(fields: [pageId], references: [id], onDelete: SetNull)
+  pageId        String?
+}
+
+// -------------------------
+// Media
+// -------------------------
+model Media {
+  id     String @id @default(cuid())
+  url    String
+  type   String // "image" | "video"
+  postId String
+
+  post   Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
+}
+
+// -------------------------
+// Comment
+// -------------------------
+model Comment {
+  id        String     @id @default(cuid())
+  content   String
+  authorId  String
+  postId    String
+  parentId  String?
+  createdAt DateTime   @default(now())
+
+  author    User       @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  post      Post       @relation(fields: [postId], references: [id], onDelete: Cascade)
+  parent    Comment?   @relation("Thread", fields: [parentId], references: [id], onDelete: Cascade)
+  replies   Comment[]  @relation("Thread")
+  likes     Like[]
+}
+
+// -------------------------
+// Like
+// -------------------------
+model Like {
+  id        String    @id @default(cuid())
+  userId    String
+  postId    String?
+  commentId String?
+  createdAt DateTime  @default(now())
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post      Post?     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  comment   Comment?  @relation(fields: [commentId], references: [id], onDelete: Cascade)
+}
+
+// -------------------------
+// Friendship
+// -------------------------
+model Friendship {
+  id           String   @id @default(cuid())
+  requesterId  String
+  addresseeId  String
+  status       String   // pending | accepted | blocked
+  createdAt    DateTime @default(now())
+
+  requester    User     @relation("Friends1", fields: [requesterId], references: [id], onDelete: Cascade)
+  addressee    User     @relation("Friends2", fields: [addresseeId], references: [id], onDelete: Cascade)
+}
+
+// -------------------------
+// Message
+// -------------------------
+model Message {
+  id         String   @id @default(cuid())
+  senderId   String
+  receiverId String
+  content    String
+  isRead     Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  sender     User     @relation("MessagesSent", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver   User     @relation("MessagesReceived", fields: [receiverId], references: [id], onDelete: Cascade)
+}
+
+// -------------------------
+// Notification
+// -------------------------
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  senderId  String?
+  postId    String?
+  type      String
+  content   String?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user      User     @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  sender    User?    @relation("NotificationSender", fields: [senderId], references: [id], onDelete: Cascade)
+  post      Post?    @relation(fields: [postId], references: [id], onDelete: Cascade)
+}
+
+// -------------------------
+// Group
+// -------------------------
+model Group {
+  id        String        @id @default(cuid())
+  name      String
+  adminId   String
+
+  admin     User          @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  members   GroupMember[]
+}
+
+// -------------------------
+// GroupMember
+// -------------------------
+model GroupMember {
+  id       String @id @default(cuid())
+  groupId  String
+  userId   String
+  role     String // "member" | "moderator" | "admin"
+
+  group    Group  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// -------------------------
+// Page
+// -------------------------
+model Page {
+  id       String   @id @default(cuid())
+  name     String
+  about    String?
+  adminId  String
+
+  admin    User     @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  posts    Post[]
+}
