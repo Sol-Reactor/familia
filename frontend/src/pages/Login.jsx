@@ -37,7 +37,7 @@ export default function Login() {
     >
       <div className="w-full max-w-md">
         <motion.div 
-          className="text-center mb-8 relative"
+          className="text-center mb-8 relative px-4"
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2 }}
@@ -56,9 +56,9 @@ export default function Login() {
             }}
           />
           
-          {/* Main logo */}
+          {/* Main logo - Responsive sizing */}
           <motion.h1 
-            className="text-6xl font-bold bg-gradient-to-r from-facebook-primary via-purple-600 to-pink-600 bg-clip-text text-transparent mb-2 relative z-10"
+            className="text-4xl sm:text-5xl md:text-6xl font-bold bg-gradient-to-r from-facebook-primary via-purple-600 to-pink-600 bg-clip-text text-transparent mb-2 relative z-10"
             animate={{
               backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'],
             }}
@@ -92,9 +92,9 @@ export default function Login() {
             ))}
           </motion.h1>
           
-          {/* Floating effect */}
+          {/* Floating effect - Responsive text size */}
           <motion.p 
-            className="text-gray-700 text-lg relative z-10"
+            className="text-base sm:text-lg text-gray-700 relative z-10"
             animate={{
               y: [0, -5, 0],
             }}

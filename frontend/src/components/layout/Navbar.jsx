@@ -52,7 +52,7 @@ export default function Navbar() {
                 transition={{ type: "spring", stiffness: 300 }}
               >
                 <motion.span 
-                  className="text-2xl font-bold bg-gradient-to-r from-facebook-primary via-purple-600 to-pink-600 bg-clip-text text-transparent"
+                  className="text-xl sm:text-2xl font-bold bg-gradient-to-r from-facebook-primary via-purple-600 to-pink-600 bg-clip-text text-transparent"
                   animate={{
                     backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'],
                   }}
@@ -85,7 +85,7 @@ export default function Navbar() {
                 
                 {/* Pulse effect */}
                 <motion.div
-                  className="absolute inset-0 bg-gradient-to-r from-facebook-primary/20 to-purple-600/20 rounded-lg blur-xl"
+                  className="absolute inset-0 bg-gradient-to-r from-facebook-primary/20 to-purple-600/20 rounded-lg blur-xl -z-10"
                   animate={{
                     opacity: [0.3, 0.6, 0.3],
                     scale: [0.95, 1.05, 0.95],
@@ -100,8 +100,8 @@ export default function Navbar() {
             </Link>
           </div>
 
-          {/* Search */}
-          <div className="flex-1 max-w-md mx-8 relative">
+          {/* Search - Hide on mobile */}
+          <div className="hidden sm:flex flex-1 max-w-md mx-8 relative">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
               <Input
