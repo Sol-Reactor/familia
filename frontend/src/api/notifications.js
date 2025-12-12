@@ -32,12 +32,15 @@ const clearAll = async () => {
 };
 
 // Hooks
-export const useNotifications = () => {
+export const useNotifications = (options = {}) => {
     const setNotifications = useNotificationStore((state) => state.setNotifications);
 
     const query = useQuery({
         queryKey: queryKeys.notifications.all,
         queryFn: fetchNotifications,
+        enabled: options.enabled !== false, // Only fetch if explicitly enabled or not specified
+        retry: false, // Don't retry failed auth requests
+        refetchOnWindowFocus: false, // Don't refetch on window focus when not authenticated
     });
 
     useEffect(() => {
