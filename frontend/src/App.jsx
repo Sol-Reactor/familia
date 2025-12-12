@@ -37,8 +37,8 @@ function AppContent() {
     initAuth();
   }, [initAuth]);
 
-  // Fetch notifications globally when authenticated
-  useNotifications();
+  // Fetch notifications globally ONLY when authenticated
+  useNotifications({ enabled: isAuthenticated });
 
   useEffect(() => {
     if (isAuthenticated) {
