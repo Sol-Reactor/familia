@@ -13,11 +13,12 @@
 - **Friends System**: Send, accept, and manage friend requests
 
 ### UI/UX Highlights
-- ✨ **Framer Motion Animations**: Smooth page transitions, stagger effects, and micro-interactions
-- 🎨 **Animated Branding**: Dynamic gradient logo with letter-by-letter animations
-- 🌙 **Dark Mode Ready**: Full dark mode support throughout the app
-- 📱 **Responsive Design**: Mobile-first approach with Tailwind CSS
-- 🎯 **Custom Scrollbars**: Styled scrollbars for better UX
+- ✨ **Purposeful motion**: subtle transitions that fully respect `prefers-reduced-motion`
+- 🎨 **Consistent design system**: Plus Jakarta Sans, semantic color tokens, one z-index scale
+- 🌙 **Dark mode**: toggle in Settings or the account menu; follows the OS by default and never flashes
+- 📱 **Mobile-first**: bottom tab bar on phones, single-pane chat with a back button, no horizontal scroll
+- ♿ **Accessible**: labelled icon buttons, visible keyboard focus, 44px touch targets, skip link, ARIA tabs/menus
+- ⏳ **Loading & empty states**: skeletons, helpful empty states and retry actions everywhere
 
 ### Advanced Features
 - **Smart Auto-Scroll**: Intelligent scrolling behavior in chat windows
@@ -126,8 +127,13 @@ cp .env.example .env
 Create a `.env` file:
 
 ```env
-VITE_API_URL=http://localhost:5000
+# Backend URL - with or without the trailing /api, both work
+VITE_API_URL=http://localhost:5000/api
 VITE_SOCKET_URL=http://localhost:5000
+
+# Cloudinary unsigned upload (post images, avatars, covers)
+VITE_CLOUDINARY_CLOUD_NAME=your-cloud-name
+VITE_CLOUDINARY_UPLOAD_PRESET=your-unsigned-preset
 ```
 
 ### Development

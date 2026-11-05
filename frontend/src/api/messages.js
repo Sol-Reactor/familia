@@ -18,6 +18,11 @@ const sendMessage = async (messageData) => {
     return data;
 };
 
+const markConversationRead = async (userId) => {
+    const { data } = await api.put(`/messages/${userId}/read`);
+    return data;
+};
+
 const deleteMessage = async (messageId) => {
     const { data } = await api.delete(`/messages/${messageId}`);
     return data;
@@ -36,6 +41,7 @@ export const useConversation = (userId) => {
         queryKey: queryKeys.messages.conversation(userId),
         queryFn: () => fetchConversation(userId),
         enabled: !!userId,
+        staleTime: 0,
     });
 };
 
@@ -44,13 +50,23 @@ export const useSendMessage = () => {
 
     return useMutation({
         mutationFn: sendMessage,
-        onSuccess: (data, variables) => {
-            queryClient.invalidateQueries({
-                queryKey: queryKeys.messages.conversation(variables.receiverId)
-            });
+        onSuccess: () => {
+            // The chat store already holds the new message; just refresh the sidebar list
             queryClient.invalidateQueries({
                 queryKey: queryKeys.messages.conversations
             });
+        },
+    });
+};
+
+export const useMarkConversationRead = () => {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: markConversationRead,
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: queryKeys.messages.conversations });
+            queryClient.invalidateQueries({ queryKey: queryKeys.notifications.all });
         },
     });
 };

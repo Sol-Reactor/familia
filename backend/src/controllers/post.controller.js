@@ -1,4 +1,6 @@
 import prisma from "../prisma.js";
+import { createNotification } from "./notification.controller.js";
+import { toInt } from "../utils/query.js";
 
 // Utility: check if two users are friends (accepted friendship)
 const areFriends = async (userA, userB) => {
@@ -16,7 +18,7 @@ const areFriends = async (userA, userB) => {
 };
 
 // Create a new post
-export const createPost = async (req, res) => {
+export const createPost = async (req, res, next) => {
     try {
         const { content, image } = req.body;
 
@@ -61,16 +63,18 @@ export const createPost = async (req, res) => {
 
         res.status(201).json(post);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        next(err);
     }
 };
 
 // Get all posts (feed)
-export const getPosts = async (req, res) => {
+export const getPosts = async (req, res, next) => {
     try {
-        const { limit = 20, page = 1, userId } = req.query;
+        const limit = toInt(req.query.limit, 20, { min: 1, max: 50 });
+        const page = toInt(req.query.page, 1, { min: 1, max: 10000 });
+        const userId = typeof req.query.userId === "string" ? req.query.userId : undefined;
         const currentUserId = req.user.id;
-        const skip = (parseInt(page) - 1) * parseInt(limit);
+        const skip = (page - 1) * limit;
 
         // If userId is provided, get that user's posts (for profile page)
         if (userId) {
@@ -87,8 +91,8 @@ export const getPosts = async (req, res) => {
 
             const posts = await prisma.post.findMany({
                 where: { authorId: userId },
-                take: parseInt(limit),
-                skip: skip,
+                take: limit,
+                skip,
                 orderBy: { createdAt: 'desc' },
                 include: {
                     author: {
@@ -161,8 +165,8 @@ export const getPosts = async (req, res) => {
             where: {
                 authorId: { in: authorIds }
             },
-            take: parseInt(limit),
-            skip: skip,
+            take: limit,
+            skip,
             orderBy: { createdAt: 'desc' },
             include: {
                 author: {
@@ -205,12 +209,12 @@ export const getPosts = async (req, res) => {
             hasMore: skip + posts.length < totalPosts
         });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        next(err);
     }
 };
 
 // Get single post by ID
-export const getPostById = async (req, res) => {
+export const getPostById = async (req, res, next) => {
     try {
         const { id } = req.params;
 
@@ -277,14 +281,20 @@ export const getPostById = async (req, res) => {
             }
         }
 
-        res.json(post);
+        const { likes, comments: _comments, ...rest } = post;
+        res.json({
+            ...rest,
+            isLiked: likes.some((like) => like.userId === req.user.id),
+            likesCount: post._count.likes,
+            commentsCount: post._count.comments,
+        });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        next(err);
     }
 };
 
 // Update post
-export const updatePost = async (req, res) => {
+export const updatePost = async (req, res, next) => {
     try {
         const { id } = req.params;
         const { content } = req.body;
@@ -342,12 +352,12 @@ export const updatePost = async (req, res) => {
 
         res.json(updatedPost);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        next(err);
     }
 };
 
 // Delete post
-export const deletePost = async (req, res) => {
+export const deletePost = async (req, res, next) => {
     try {
         const { id } = req.params;
 
@@ -370,12 +380,12 @@ export const deletePost = async (req, res) => {
 
         res.json({ message: "Post deleted successfully" });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        next(err);
     }
 };
 
 // Like/Unlike a post
-export const toggleLike = async (req, res) => {
+export const toggleLike = async (req, res, next) => {
     try {
         const { id } = req.params;
 
@@ -430,27 +440,23 @@ export const toggleLike = async (req, res) => {
 
             // Create notification for post author (if not liking own post)
             const currentUserId = req.user.id;
-            if (post.authorId !== currentUserId) {
-                await prisma.notification.create({
-                    data: {
-                        userId: post.authorId,
-                        senderId: currentUserId,
-                        postId: id,
-                        type: 'like',
-                        content: `${req.user.name} liked your post`
-                    }
-                });
-            }
+            await createNotification({
+                userId: post.authorId,
+                senderId: currentUserId,
+                postId: id,
+                type: 'like',
+                content: `${req.user.name} liked your post`
+            });
 
             return res.json({ message: "Post liked", liked: true });
         }
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        next(err);
     }
 };
 
 // Add comment to post
-export const addComment = async (req, res) => {
+export const addComment = async (req, res, next) => {
     try {
         const { id } = req.params;
         const { content } = req.body;
@@ -500,29 +506,26 @@ export const addComment = async (req, res) => {
         });
 
         // Create notification for post author (if not commenting on own post)
-        if (post.authorId !== currentUserId) {
-            await prisma.notification.create({
-                data: {
-                    userId: post.authorId,
-                    senderId: currentUserId,
-                    postId: id,
-                    type: 'comment',
-                    content: `${req.user.name} commented on your post`
-                }
-            });
-        }
+        await createNotification({
+            userId: post.authorId,
+            senderId: currentUserId,
+            postId: id,
+            type: 'comment',
+            content: `${req.user.name} commented on your post`
+        });
 
         res.status(201).json(comment);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        next(err);
     }
 };
 
 // Get comments for a post
-export const getComments = async (req, res) => {
+export const getComments = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const { limit = 20, skip = 0 } = req.query;
+        const limit = toInt(req.query.limit, 20, { min: 1, max: 100 });
+        const skip = toInt(req.query.skip, 0, { min: 0, max: 100000 });
 
         // Ensure requester can view post comments (same rule as viewing post)
         const post = await prisma.post.findUnique({ where: { id } });
@@ -539,8 +542,8 @@ export const getComments = async (req, res) => {
 
         const comments = await prisma.comment.findMany({
             where: { postId: id },
-            take: parseInt(limit),
-            skip: parseInt(skip),
+            take: limit,
+            skip,
             orderBy: { createdAt: 'desc' },
             include: {
                 author: {
@@ -559,6 +562,6 @@ export const getComments = async (req, res) => {
 
         res.json(comments);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        next(err);
     }
 };

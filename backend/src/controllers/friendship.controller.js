@@ -1,8 +1,9 @@
 import prisma from "../prisma.js";
 import { createNotification } from "./notification.controller.js";
+import { toInt } from "../utils/query.js";
 
 // Send friend request
-export const sendFriendRequest = async (req, res) => {
+export const sendFriendRequest = async (req, res, next) => {
     try {
         const { userId } = req.params;
         const requesterId = req.user.id;
@@ -33,9 +34,12 @@ export const sendFriendRequest = async (req, res) => {
 
         if (existingFriendship) {
             if (existingFriendship.status === "accepted") {
-                return res.status(400).json({ error: "You are already friends" });
+                return res.status(409).json({ error: "You are already friends" });
             }
-            return res.status(400).json({ error: "Friend request already sent" });
+            if (existingFriendship.requesterId === userId) {
+                return res.status(409).json({ error: "This person already sent you a friend request. Check your requests." });
+            }
+            return res.status(409).json({ error: "Friend request already sent" });
         }
 
         // Create friend request
@@ -67,12 +71,12 @@ export const sendFriendRequest = async (req, res) => {
 
         res.status(201).json({ message: "Friend request sent", friendship });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        next(err);
     }
 };
 
 // Accept friend request
-export const acceptFriendRequest = async (req, res) => {
+export const acceptFriendRequest = async (req, res, next) => {
     try {
         const { requestId } = req.params;
         const userId = req.user.id;
@@ -122,12 +126,12 @@ export const acceptFriendRequest = async (req, res) => {
 
         res.json({ message: "Friend request accepted", friendship: updatedFriendship });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        next(err);
     }
 };
 
 // Reject friend request
-export const rejectFriendRequest = async (req, res) => {
+export const rejectFriendRequest = async (req, res, next) => {
     try {
         const { requestId } = req.params;
         const userId = req.user.id;
@@ -146,27 +150,23 @@ export const rejectFriendRequest = async (req, res) => {
             return res.status(403).json({ error: "You cannot reject this friend request" });
         }
 
+        if (friendship.status !== "pending") {
+            return res.status(400).json({ error: "This friend request is no longer pending" });
+        }
+
         // Delete the friendship
         await prisma.friendship.delete({
             where: { id: requestId }
         });
 
-        // Notify requester about rejection
-        await createNotification({
-            userId: friendship.requesterId,
-            senderId: userId,
-            type: "friend_reject",
-            content: `${req.user.name} rejected your friend request`
-        });
-
         res.json({ message: "Friend request rejected" });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        next(err);
     }
 };
 
 // Unfriend or cancel request
-export const unfriend = async (req, res) => {
+export const unfriend = async (req, res, next) => {
     try {
         const { userId } = req.params;
         const currentUserId = req.user.id;
@@ -192,12 +192,12 @@ export const unfriend = async (req, res) => {
 
         res.json({ message: "Friendship removed" });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        next(err);
     }
 };
 
 // Get friends list
-export const getFriends = async (req, res) => {
+export const getFriends = async (req, res, next) => {
     try {
         const userId = req.user.id;
 
@@ -238,12 +238,12 @@ export const getFriends = async (req, res) => {
 
         res.json(friends);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        next(err);
     }
 };
 
 // Get pending friend requests
-export const getFriendRequests = async (req, res) => {
+export const getFriendRequests = async (req, res, next) => {
     try {
         const userId = req.user.id;
 
@@ -271,12 +271,12 @@ export const getFriendRequests = async (req, res) => {
 
         res.json(requests);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        next(err);
     }
 };
 
 // Get friendship status with a specific user
-export const getFriendshipStatus = async (req, res) => {
+export const getFriendshipStatus = async (req, res, next) => {
     try {
         const { userId } = req.params;
         const currentUserId = req.user.id;
@@ -301,21 +301,22 @@ export const getFriendshipStatus = async (req, res) => {
 
         // Return status with direction info
         res.json({
+            id: friendship.id,
             status: friendship.status,
             requesterId: friendship.requesterId,
             isSent: friendship.requesterId === currentUserId,
             isReceived: friendship.addresseeId === currentUserId
         });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        next(err);
     }
 };
 
 // Get friend suggestions (non-friends)
-export const getSuggestedFriends = async (req, res) => {
+export const getSuggestedFriends = async (req, res, next) => {
     try {
         const userId = req.user.id;
-        const { limit = 10 } = req.query;
+        const limit = toInt(req.query.limit, 10, { min: 1, max: 50 });
 
         // Get all user IDs that current user has any friendship with
         const existingFriendships = await prisma.friendship.findMany({
@@ -345,7 +346,7 @@ export const getSuggestedFriends = async (req, res) => {
                     notIn: Array.from(excludeIds)
                 }
             },
-            take: parseInt(limit),
+            take: limit,
             select: {
                 id: true,
                 name: true,
@@ -357,6 +358,6 @@ export const getSuggestedFriends = async (req, res) => {
 
         res.json(suggestions);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        next(err);
     }
 };

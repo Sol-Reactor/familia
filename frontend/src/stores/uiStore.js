@@ -1,8 +1,27 @@
 import { create } from 'zustand';
 
-export const useUIStore = create((set) => ({
+const THEME_KEY = 'familia-theme';
+
+const getInitialTheme = () => {
+    try {
+        const saved = localStorage.getItem(THEME_KEY);
+        if (saved === 'dark' || saved === 'light') return saved;
+        return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    } catch {
+        return 'light';
+    }
+};
+
+const applyTheme = (theme) => {
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    try {
+        localStorage.setItem(THEME_KEY, theme);
+    } catch { /* storage may be unavailable */ }
+};
+
+export const useUIStore = create((set, get) => ({
     sidebarCollapsed: false,
-    theme: 'light',
+    theme: getInitialTheme(),
     isLoading: false,
     modals: {
         createPost: false,
@@ -16,23 +35,15 @@ export const useUIStore = create((set) => ({
     setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
 
     setTheme: (theme) => {
-        if (theme === 'dark') {
-            document.documentElement.classList.add('dark');
-        } else {
-            document.documentElement.classList.remove('dark');
-        }
+        applyTheme(theme);
         set({ theme });
     },
 
-    toggleTheme: () => set((state) => {
-        const newTheme = state.theme === 'light' ? 'dark' : 'light';
-        if (newTheme === 'dark') {
-            document.documentElement.classList.add('dark');
-        } else {
-            document.documentElement.classList.remove('dark');
-        }
-        return { theme: newTheme };
-    }),
+    toggleTheme: () => {
+        const next = get().theme === 'dark' ? 'light' : 'dark';
+        applyTheme(next);
+        set({ theme: next });
+    },
 
     setLoading: (isLoading) => set({ isLoading }),
 

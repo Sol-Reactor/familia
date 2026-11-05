@@ -22,11 +22,15 @@
 - **Message Delivery**: Live message updates
 
 ### Security & Validation
-- **JWT Authentication**: Secure token-based auth
-- **Joi Validation**: Request validation on all endpoints
-- **Password Hashing**: bcrypt with salt rounds
-- **CORS Protection**: Configured CORS middleware
-- **File Upload Security**: Multer with Cloudinary integration
+- **JWT Authentication**: HS256-pinned tokens; every token embeds a password fingerprint, so changing your password signs out all other sessions
+- **Brute-force protection**: rate limits on login (10 / 15 min), sign-up (10 / hour), messages (30 / min) and the whole API (300 / min per IP)
+- **No user enumeration**: login returns one generic "Invalid email or password" with constant-time checks
+- **Password policy**: 8–72 characters with at least one letter and one number (bcrypt, 12 rounds)
+- **Joi Validation**: every request body is validated, trimmed and stripped of unknown fields
+- **Safe URLs**: profile websites must be http(s) (blocks `javascript:` XSS); image URLs must be Cloudinary HTTPS
+- **Socket.IO hardening**: sockets use the same auth as the REST API; clients can only send typing events (to friends). Messages and notifications are emitted by the server only after they are saved
+- **No error leakage**: 500 errors return a generic message in production
+- **CORS Protection**: a single shared allow-list for Express and Socket.IO
 
 ## 🛠️ Tech Stack
 
@@ -143,13 +147,15 @@ Create a `.env` file:
 # Database
 DATABASE_URL="postgresql://user:password@localhost:5432/familia"
 
-# JWT
-JWT_SECRET=your-super-secret-key-here
+# JWT - REQUIRED in production (server refuses to start without it).
+# Use a long random value, e.g.: node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
+JWT_SECRET=your-long-random-secret
+JWT_EXPIRES_IN=7d
 
 # Server
 NODE_ENV=development
 PORT=5000
-CLIENT_URL=http://localhost:5173
+CLIENT_URL=http://localhost:5173   # comma-separate multiple origins
 
 # Cloudinary
 CLOUDINARY_CLOUD_NAME=your-cloud-name
@@ -175,93 +181,94 @@ npm run prisma:deploy    # Deploy migrations (production)
 
 ## 📡 API Endpoints
 
+All routes are prefixed with `/api` and (except register/login) require `Authorization: Bearer <token>`.
+
 ### Authentication
 ```
-POST /api/auth/register   # Register new user
-POST /api/auth/login      # Login user
-POST /api/auth/logout     # Logout user
-GET  /api/auth/me        # Get current user
+POST /api/auth/register   # Register new user (rate limited)
+POST /api/auth/login      # Login user (rate limited)
+GET  /api/auth/me         # Validate token / get current user
+POST /api/auth/logout     # Logout (client discards its token)
 ```
 
 ### Users
 ```
-GET    /api/users              # Search users
-GET    /api/users/:id          # Get user profile
+GET    /api/users?search=   # Search users by name/username (max 50)
+GET    /api/users/:id          # Get user profile (+ friendsCount)
 GET    /api/users/me/profile   # Get own profile
 PUT    /api/users/me/profile   # Update profile
-PUT    /api/users/me/password  # Update password
-DELETE /api/users/me/account   # Delete account
+PUT    /api/users/me/password  # Update password -> returns a fresh token
+DELETE /api/users/me/account   # Delete account (body: { password })
 ```
 
-### Posts
+### Posts, likes & comments
 ```
-GET    /api/posts           # Get feed posts
-GET    /api/posts/my        # Get my posts
-GET    /api/posts/:id       # Get single post
-POST   /api/posts           # Create post
-PUT    /api/posts/:id       # Update post
-DELETE /api/posts/:id       # Delete post
+GET    /api/posts?page=&limit=&userId=  # Feed, or one user's posts (friends only)
+GET    /api/posts/:id                   # Single post
+POST   /api/posts                       # Create post
+PUT    /api/posts/:id                   # Update post (author only)
+DELETE /api/posts/:id                   # Delete post (author only)
+POST   /api/posts/:id/like              # Like / unlike
+GET    /api/posts/:id/comments          # List comments
+POST   /api/posts/:id/comments          # Add comment
 ```
 
 ### Friends
 ```
-GET    /api/friendships           # Get friends list
-GET    /api/friendships/requests  # Get pending requests
-POST   /api/friendships/request   # Send friend request
-PUT    /api/friendships/:id/accept  # Accept request
-PUT    /api/friendships/:id/reject  # Reject request
-DELETE /api/friendships/:id        # Remove friend
+GET    /api/friends                    # Friends list
+GET    /api/friends/requests           # Incoming pending requests
+GET    /api/friends/suggestions        # People you may know
+GET    /api/friends/status/:userId     # Friendship status with a user
+POST   /api/friends/request/:userId    # Send friend request
+PUT    /api/friends/accept/:requestId  # Accept request
+PUT    /api/friends/reject/:requestId  # Decline request
+DELETE /api/friends/:userId            # Unfriend / cancel request
 ```
 
 ### Messages
 ```
-GET  /api/messages/conversations  # Get all conversations
-GET  /api/messages/:userId        # Get conversation with user
-POST /api/messages                # Send message
+GET    /api/messages/conversations   # All conversations
+GET    /api/messages/:userId         # Conversation with user (latest 50, marks as read)
+PUT    /api/messages/:userId/read    # Mark conversation as read
+POST   /api/messages                 # Send message (friends only, rate limited)
+DELETE /api/messages/:messageId      # Delete own message
 ```
 
 ### Notifications
 ```
-GET    /api/notifications              # Get notifications
-PUT    /api/notifications/:id/read     # Mark as read
-PUT    /api/notifications/mark-all-read # Mark all read
-DELETE /api/notifications/:id          # Delete notification
-```
-
-### Likes & Comments
-```
-POST   /api/likes         # Like post/comment
-DELETE /api/likes/:id     # Unlike
-
-POST   /api/comments      # Create comment
-DELETE /api/comments/:id  # Delete comment
+GET    /api/notifications                       # Notifications + unreadCount
+PUT    /api/notifications/read/:notificationId  # Mark as read
+PUT    /api/notifications/read-all              # Mark all read
+DELETE /api/notifications/:notificationId       # Delete one
+DELETE /api/notifications                       # Clear all
 ```
 
 ## 🔌 WebSocket Events
 
 ### Client → Server
 ```javascript
-typing:start    // User started typing
-typing:stop     // User stopped typing
-message:send    // Send message
+typing:start    // { receiverId } - only relayed to friends
+typing:stop     // { receiverId }
 ```
 
 ### Server → Client
 ```javascript
-notification:new  // New notification
+notification:new  // New notification (likes, comments, friend requests, messages)
 message:new       // New message received
 user:typing       // Someone is typing
+users:online      // Online user list (on connect)
 user:online       // User came online
-user:offline      // User went offline
+user:offline      // User went offline (last tab closed)
 ```
 
 ## 🔒 Authentication Flow
 
-1. User registers/logs in → receives JWT token
-2. Token stored on client, sent in `Authorization: Bearer <token>` header
-3. `authenticate` middleware verifies token on protected routes
-4. `req.user` populated with user data
-5. Socket.IO authenticated via same JWT token
+1. User registers/logs in → receives a JWT (contains user id + password fingerprint)
+2. Client stores the token and sends `Authorization: Bearer <token>`
+3. `authenticate` middleware verifies the signature, expiry, that the user still exists, and that the password hasn't changed
+4. `req.user` is populated with the user (never the password hash)
+5. Socket.IO authenticates with the same token and the same checks
+6. On app load the client calls `GET /api/auth/me` to validate a stored session
 
 ## 📝 Key Features Explained
 

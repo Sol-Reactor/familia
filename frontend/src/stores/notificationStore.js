@@ -1,34 +1,32 @@
 import { create } from 'zustand';
 
-export const useNotificationStore = create((set, get) => ({
+const isRead = (n) => Boolean(n?.read ?? n?.isRead);
+// Message notifications are shown on the Messages icon, not the bell
+const countsForBell = (n) => !isRead(n) && n?.type !== 'message';
+
+export const useNotificationStore = create((set) => ({
     notifications: [],
     unreadCount: 0,
 
     setNotifications: (notifications) => {
-        // Exclude message notifications from bell badge count
-        const unreadCount = notifications.filter((n) =>
-            !(n.read ?? n.isRead) && n.type !== 'message'
-        ).length;
-        set({ notifications, unreadCount });
+        set({ notifications, unreadCount: notifications.filter(countsForBell).length });
     },
 
     addNotification: (notification) => {
-        set((state) => ({
-            notifications: [notification, ...state.notifications],
-            // Only increment unreadCount if NOT a message notification
-            unreadCount: (notification.read ?? notification.isRead) || notification.type === 'message'
-                ? state.unreadCount
-                : state.unreadCount + 1,
-        }));
+        set((state) => {
+            if (state.notifications.some((n) => n.id === notification.id)) return state;
+            const notifications = [notification, ...state.notifications];
+            return { notifications, unreadCount: notifications.filter(countsForBell).length };
+        });
     },
 
     markAsRead: (notificationId) => {
-        set((state) => ({
-            notifications: state.notifications.map((n) =>
+        set((state) => {
+            const notifications = state.notifications.map((n) =>
                 n.id === notificationId ? { ...n, read: true, isRead: true } : n
-            ),
-            unreadCount: Math.max(0, state.unreadCount - 1),
-        }));
+            );
+            return { notifications, unreadCount: notifications.filter(countsForBell).length };
+        });
     },
 
     markAllAsRead: () => {
@@ -40,13 +38,8 @@ export const useNotificationStore = create((set, get) => ({
 
     removeNotification: (notificationId) => {
         set((state) => {
-            const notification = state.notifications.find((n) => n.id === notificationId);
-            return {
-                notifications: state.notifications.filter((n) => n.id !== notificationId),
-                unreadCount: notification && !(notification.read ?? notification.isRead)
-                    ? Math.max(0, state.unreadCount - 1)
-                    : state.unreadCount,
-            };
+            const notifications = state.notifications.filter((n) => n.id !== notificationId);
+            return { notifications, unreadCount: notifications.filter(countsForBell).length };
         });
     },
 

@@ -1,96 +1,121 @@
-import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { Users, UserPlus, Sparkles } from 'lucide-react';
 import MainLayout from '../components/layout/MainLayout';
 import FriendCard from '../components/friends/FriendCard';
 import FriendRequestCard from '../components/friends/FriendRequestCard';
 import SuggestionCard from '../components/friends/SuggestionCard';
+import EmptyState from '../components/common/EmptyState';
+import { CardGridSkeleton } from '../components/common/Skeleton';
+import { Card } from '../components/ui/card';
 import { useFriends, useFriendRequests, useSuggestedFriends } from '../api/friends';
+import { cn } from '../lib/utils';
+
+const TAB_IDS = ['friends', 'requests', 'suggestions'];
 
 export default function Friends() {
-  const [activeTab, setActiveTab] = useState('friends'); // friends, requests, suggestions
-  
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requested = searchParams.get('tab');
+  const activeTab = TAB_IDS.includes(requested) ? requested : 'friends';
+  const setActiveTab = (tab) => setSearchParams(tab === 'friends' ? {} : { tab }, { replace: true });
+
   const { data: friends, isLoading: loadingFriends } = useFriends();
   const { data: requests, isLoading: loadingRequests } = useFriendRequests();
   const { data: suggestions, isLoading: loadingSuggestions } = useSuggestedFriends();
 
   const tabs = [
-    { id: 'friends', label: 'Friends', count: friends?.length || 0 },
-    { id: 'requests', label: 'Friend Requests', count: requests?.length || 0 },
-    { id: 'suggestions', label: 'Suggestions', count: suggestions?.length || 0 },
+    { id: 'friends', label: 'All friends', count: friends?.length || 0 },
+    { id: 'requests', label: 'Requests', count: requests?.length || 0, highlight: true },
+    { id: 'suggestions', label: 'Suggestions', count: 0 },
   ];
 
-  return (
-    <MainLayout>
-      <div className="space-y-4">
-        <h1 className="text-3xl font-bold">Friends</h1>
+  const onTabKeyDown = (e) => {
+    const index = TAB_IDS.indexOf(activeTab);
+    if (e.key === 'ArrowRight') setActiveTab(TAB_IDS[(index + 1) % TAB_IDS.length]);
+    if (e.key === 'ArrowLeft') setActiveTab(TAB_IDS[(index - 1 + TAB_IDS.length) % TAB_IDS.length]);
+  };
 
-        {/* Tabs */}
-        <div className="flex gap-2 border-b">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`px-4 py-2 font-medium transition-colors relative ${
-                activeTab === tab.id
-                  ? 'text-facebook-primary'
-                  : 'text-gray-600 hover:text-gray-900'
-              }`}
-            >
-              {tab.label}
-              {tab.count > 0 && (
-                <span className="ml-2 px-2 py-0.5 text-xs bg-gray-200 rounded-full">
-                  {tab.count}
-                </span>
-              )}
-              {activeTab === tab.id && (
-                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-facebook-primary" />
-              )}
-            </button>
-          ))}
+  const renderGrid = (loading, items, renderItem, empty) => {
+    if (loading) return <CardGridSkeleton count={3} />;
+    if (!items?.length) {
+      return (
+        <Card className="col-span-full">
+          <EmptyState {...empty} />
+        </Card>
+      );
+    }
+    return items.map(renderItem);
+  };
+
+  return (
+    <MainLayout title="Friends" wide>
+      <div className="space-y-4">
+        <h1 className="px-1 text-2xl font-extrabold tracking-tight sm:text-3xl">Friends</h1>
+
+        <div
+          role="tablist"
+          aria-label="Friends sections"
+          className="no-scrollbar -mx-3 flex gap-2 overflow-x-auto px-3 sm:mx-0 sm:px-0"
+          onKeyDown={onTabKeyDown}
+        >
+          {tabs.map((tab) => {
+            const selected = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                id={`tab-${tab.id}`}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                aria-controls={`panel-${tab.id}`}
+                tabIndex={selected ? 0 : -1}
+                onClick={() => setActiveTab(tab.id)}
+                className={cn(
+                  'inline-flex h-10 shrink-0 items-center gap-2 rounded-full px-4 text-sm font-semibold transition-colors',
+                  selected ? 'bg-primary text-primary-foreground' : 'bg-card text-foreground/80 shadow-card hover:bg-accent'
+                )}
+              >
+                {tab.label}
+                {tab.count > 0 && (
+                  <span
+                    className={cn(
+                      'rounded-full px-2 py-0.5 text-xs font-bold',
+                      selected ? 'bg-white/20' : tab.highlight ? 'bg-destructive text-white' : 'bg-muted'
+                    )}
+                  >
+                    {tab.count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
 
-        {/* Content */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {activeTab === 'friends' && (
-            loadingFriends ? (
-              <p className="col-span-full text-center text-gray-500">Loading friends...</p>
-            ) : friends && friends.length > 0 ? (
-              friends.map((friend) => (
-                <FriendCard key={friend.id} friend={friend} />
-              ))
-            ) : (
-              <p className="col-span-full text-center text-gray-500">
-                No friends yet. Check out suggestions to add friends!
-              </p>
-            )
-          )}
+        <div
+          id={`panel-${activeTab}`}
+          role="tabpanel"
+          aria-labelledby={`tab-${activeTab}`}
+          className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3"
+        >
+          {activeTab === 'friends' &&
+            renderGrid(loadingFriends, friends, (friend) => <FriendCard key={friend.id} friend={friend} />, {
+              icon: Users,
+              title: 'No friends yet',
+              description: 'Check out suggestions to start connecting.',
+            })}
 
-          {activeTab === 'requests' && (
-            loadingRequests ? (
-              <p className="col-span-full text-center text-gray-500">Loading requests...</p>
-            ) : requests && requests.length > 0 ? (
-              requests.map((request) => (
-                <FriendRequestCard key={request.id} request={request} />
-              ))
-            ) : (
-              <p className="col-span-full text-center text-gray-500">
-                No pending friend requests
-              </p>
-            )
-          )}
+          {activeTab === 'requests' &&
+            renderGrid(loadingRequests, requests, (request) => <FriendRequestCard key={request.id} request={request} />, {
+              icon: UserPlus,
+              title: 'No pending requests',
+              description: 'When someone sends you a friend request, it will show up here.',
+            })}
 
-          {activeTab === 'suggestions' && (
-            loadingSuggestions ? (
-              <p className="col-span-full text-center text-gray-500">Loading suggestions...</p>
-            ) : suggestions && suggestions.length > 0 ? (
-              suggestions.map((suggestion) => (
-                <SuggestionCard key={suggestion.id} suggestion={suggestion} />
-              ))
-            ) : (
-              <p className="col-span-full text-center text-gray-500">
-                No new people to suggest right now
-              </p>
-            )
-          )}
+          {activeTab === 'suggestions' &&
+            renderGrid(loadingSuggestions, suggestions, (suggestion) => <SuggestionCard key={suggestion.id} suggestion={suggestion} />, {
+              icon: Sparkles,
+              title: 'No suggestions right now',
+              description: "You're connected with everyone we know about. Check back later!",
+            })}
         </div>
       </div>
     </MainLayout>

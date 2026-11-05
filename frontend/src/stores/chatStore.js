@@ -1,55 +1,63 @@
 import { create } from 'zustand';
 
-export const useChatStore = create((set, get) => ({
+const initialState = {
     conversations: [],
     activeConversation: null,
     messages: {},
     typingUsers: {},
     onlineUsers: new Set(),
     unreadCounts: {},
+};
+
+export const useChatStore = create((set, get) => ({
+    ...initialState,
 
     setConversations: (conversations) => set({ conversations }),
 
     setActiveConversation: (userId) => {
-        set({ activeConversation: userId });
-        // Mark messages as read when opening conversation
         const unreadCounts = { ...get().unreadCounts };
-        delete unreadCounts[userId];
-        set({ unreadCounts });
+        if (userId) delete unreadCounts[userId];
+        set({ activeConversation: userId, unreadCounts });
     },
 
     setUnreadCounts: (counts) => {
-        set({ unreadCounts: counts });
+        // The open conversation is always considered read
+        const { activeConversation } = get();
+        const next = { ...counts };
+        if (activeConversation) delete next[activeConversation];
+        set({ unreadCounts: next });
     },
 
     addMessage: (message, currentUserId = null) => {
-        const { activeConversation, unreadCounts } = get();
+        if (!message) return;
+        const { activeConversation } = get();
 
-        // Determine the conversation partner (the OTHER person in the conversation)
-        const otherUserId = message.senderId === currentUserId
-            ? message.receiverId  // If I sent it, conversation is with receiver
-            : message.senderId;   // If I received it, conversation is with sender
+        // The conversation partner is the OTHER person in the conversation
+        const otherUserId = message.senderId === currentUserId ? message.receiverId : message.senderId;
+        const existing = get().messages[otherUserId] || [];
+
+        // De-duplicate: the same message can arrive from the REST response AND the socket
+        if (message.id && existing.some((m) => m.id === message.id)) return;
 
         set((state) => ({
             messages: {
                 ...state.messages,
-                [otherUserId]: [...(state.messages[otherUserId] || []), message],
+                [otherUserId]: [...existing, message],
             },
         }));
 
-        // Only increment unread count if:
-        // 1. I am NOT the sender (I received this message)
-        // 2. AND this conversation is not currently active/open
         const isReceivedMessage = currentUserId && message.senderId !== currentUserId;
-        const isConversationActive = otherUserId === activeConversation;
+        // Only "read" if that chat is open AND the user is actually on the Messages page
+        const onMessagesPage = typeof window !== 'undefined' && window.location.pathname.startsWith('/messages');
+        const isConversationActive = onMessagesPage && otherUserId === activeConversation;
 
         if (isReceivedMessage && !isConversationActive) {
-            set({
+            set((state) => ({
                 unreadCounts: {
-                    ...unreadCounts,
-                    [message.senderId]: (unreadCounts[message.senderId] || 0) + 1,
+                    ...state.unreadCounts,
+                    [message.senderId]: (state.unreadCounts[message.senderId] || 0) + 1,
                 },
-            });
+            }));
         }
     },
 
@@ -96,4 +104,6 @@ export const useChatStore = create((set, get) => ({
             typingUsers: {},
         });
     },
+
+    reset: () => set({ ...initialState, onlineUsers: new Set() }),
 }));

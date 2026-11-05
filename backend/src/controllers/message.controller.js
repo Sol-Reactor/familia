@@ -1,6 +1,16 @@
 import prisma from "../prisma.js";
-import { sendMessageToUser, sendNotificationToUser } from "../config/socket.js";
+import { sendMessageToUser } from "../config/socket.js";
 import { createNotification } from "./notification.controller.js";
+import { toInt } from "../utils/query.js";
+
+const participantSelect = {
+    select: {
+        id: true,
+        name: true,
+        username: true,
+        avatarUrl: true,
+    },
+};
 
 const areFriends = async (userA, userB) => {
     if (!userA || !userB) return false;
@@ -9,248 +19,175 @@ const areFriends = async (userA, userB) => {
             status: "accepted",
             OR: [
                 { requesterId: userA, addresseeId: userB },
-                { requesterId: userB, addresseeId: userA }
-            ]
-        }
+                { requesterId: userB, addresseeId: userA },
+            ],
+        },
+        select: { id: true },
     });
     return Boolean(friendship);
 };
 
 // Send message
-export const sendMessage = async (req, res) => {
+export const sendMessage = async (req, res, next) => {
     try {
         const { receiverId, content } = req.body;
         const senderId = req.user.id;
 
-        // Can't send message to yourself
         if (senderId === receiverId) {
             return res.status(400).json({ error: "You cannot send a message to yourself" });
         }
 
-        // Check if receiver exists
         const receiverExists = await prisma.user.findUnique({
-            where: { id: receiverId }
+            where: { id: receiverId },
+            select: { id: true },
         });
 
         if (!receiverExists) {
             return res.status(404).json({ error: "Receiver not found" });
         }
 
-        // Only allow messaging between friends
-        const friends = await areFriends(senderId, receiverId);
-        if (!friends) {
+        if (!(await areFriends(senderId, receiverId))) {
             return res.status(403).json({ error: "You can only message your friends" });
         }
 
-        // Create message
         const message = await prisma.message.create({
-            data: {
-                senderId,
-                receiverId,
-                content
-            },
-            include: {
-                sender: {
-                    select: {
-                        id: true,
-                        name: true,
-                        username: true,
-                        avatarUrl: true
-                    }
-                },
-                receiver: {
-                    select: {
-                        id: true,
-                        name: true,
-                        username: true,
-                        avatarUrl: true
-                    }
-                }
-            }
+            data: { senderId, receiverId, content },
+            include: { sender: participantSelect, receiver: participantSelect },
         });
 
-        // Send real-time notification to receiver via Socket.IO
+        // Real-time delivery (server is the only source of message:new events)
         sendMessageToUser(receiverId, message);
 
-        // Persist notification for receiver
-        const notification = await createNotification({
+        // Persist + push notification (createNotification emits via socket)
+        await createNotification({
             userId: receiverId,
             senderId,
             type: "message",
-            content: `${req.user.name} sent you a message`
+            content: `${req.user.name} sent you a message`,
         });
-
-        // Send real-time notification to receiver via Socket.IO
-        if (notification) {
-            sendNotificationToUser(receiverId, notification);
-        }
 
         res.status(201).json(message);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        next(err);
     }
 };
 
-// Get conversation with a specific user
-export const getConversation = async (req, res) => {
+// Get conversation with a specific user (most recent messages, oldest first)
+export const getConversation = async (req, res, next) => {
     try {
         const { userId } = req.params;
         const currentUserId = req.user.id;
-        const { limit = 50, skip = 0 } = req.query;
+        const limit = toInt(req.query.limit, 50, { min: 1, max: 200 });
+        const skip = toInt(req.query.skip, 0, { min: 0, max: 100000 });
 
-        // Only allow messaging between friends
-        const friends = await areFriends(currentUserId, userId);
-        if (!friends) {
+        if (!(await areFriends(currentUserId, userId))) {
             return res.status(403).json({ error: "You can only message your friends" });
         }
 
-        // Mark messages as read (temporarily disabled - may need migration)
-        /* await prisma.message.updateMany({
-            where: {
-                senderId: userId,
-                receiverId: currentUserId,
-                isRead: false
-            },
-            data: { isRead: true }
-        }); */
+        // Mark incoming messages as read now that the conversation is opened
+        await prisma.message.updateMany({
+            where: { senderId: userId, receiverId: currentUserId, isRead: false },
+            data: { isRead: true },
+        });
 
-        // Get all messages between the two users
+        // Fetch NEWEST first so "limit" keeps the latest messages, then flip for display
         const messages = await prisma.message.findMany({
             where: {
                 OR: [
                     { senderId: currentUserId, receiverId: userId },
-                    { senderId: userId, receiverId: currentUserId }
-                ]
+                    { senderId: userId, receiverId: currentUserId },
+                ],
             },
-            take: parseInt(limit),
-            skip: parseInt(skip),
-            orderBy: {
-                createdAt: 'asc'
-            },
-            include: {
-                sender: {
-                    select: {
-                        id: true,
-                        name: true,
-                        username: true,
-                        avatarUrl: true
-                    }
-                },
-                receiver: {
-                    select: {
-                        id: true,
-                        name: true,
-                        username: true,
-                        avatarUrl: true
-                    }
-                }
-            }
+            take: limit,
+            skip,
+            orderBy: { createdAt: "desc" },
+            include: { sender: participantSelect, receiver: participantSelect },
         });
 
-        res.json(messages);
+        res.json(messages.reverse());
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        next(err);
     }
 };
 
 // Get all conversations (unique users with last message)
-export const getConversations = async (req, res) => {
+export const getConversations = async (req, res, next) => {
     try {
         const userId = req.user.id;
 
-        // Get all messages where user is sender or receiver
         const messages = await prisma.message.findMany({
             where: {
-                OR: [
-                    { senderId: userId },
-                    { receiverId: userId }
-                ]
+                OR: [{ senderId: userId }, { receiverId: userId }],
             },
-            orderBy: {
-                createdAt: 'desc'
-            },
-            include: {
-                sender: {
-                    select: {
-                        id: true,
-                        name: true,
-                        username: true,
-                        avatarUrl: true
-                    }
-                },
-                receiver: {
-                    select: {
-                        id: true,
-                        name: true,
-                        username: true,
-                        avatarUrl: true
-                    }
-                }
-            }
+            orderBy: { createdAt: "desc" },
+            take: 2000,
+            include: { sender: participantSelect, receiver: participantSelect },
         });
 
-        // Group by conversation partner and get last message
         const conversationsMap = new Map();
 
-        messages.forEach(message => {
-            const partnerId = message.senderId === userId
-                ? message.receiverId
-                : message.senderId;
+        for (const message of messages) {
+            const isMine = message.senderId === userId;
+            const partnerId = isMine ? message.receiverId : message.senderId;
 
             if (!conversationsMap.has(partnerId)) {
-                const otherUser = message.senderId === userId
-                    ? message.receiver
-                    : message.sender;
                 conversationsMap.set(partnerId, {
                     id: partnerId,
-                    otherUser,
+                    otherUser: isMine ? message.receiver : message.sender,
                     lastMessage: message,
-                    unreadCount: 0
+                    unreadCount: 0,
                 });
             }
 
-            // Calculate unread count
-            if (message.receiverId === userId && !message.isRead) {
-                const conv = conversationsMap.get(partnerId);
-                conv.unreadCount += 1;
+            if (!isMine && !message.isRead) {
+                conversationsMap.get(partnerId).unreadCount += 1;
             }
-        });
+        }
 
-        const conversations = Array.from(conversationsMap.values());
-
-        res.json(conversations);
+        res.json(Array.from(conversationsMap.values()));
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        next(err);
+    }
+};
+
+// Mark a conversation as read without refetching it
+export const markConversationRead = async (req, res, next) => {
+    try {
+        const { userId } = req.params;
+        await prisma.message.updateMany({
+            where: { senderId: userId, receiverId: req.user.id, isRead: false },
+            data: { isRead: true },
+        });
+        // Clear the matching "message" notifications too
+        await prisma.notification.updateMany({
+            where: { userId: req.user.id, senderId: userId, type: "message", read: false },
+            data: { read: true },
+        });
+        res.json({ message: "Conversation marked as read" });
+    } catch (err) {
+        next(err);
     }
 };
 
 // Delete message
-export const deleteMessage = async (req, res) => {
+export const deleteMessage = async (req, res, next) => {
     try {
         const { messageId } = req.params;
-        const userId = req.user.id;
 
-        // Find message
-        const message = await prisma.message.findUnique({
-            where: { id: messageId }
-        });
+        const message = await prisma.message.findUnique({ where: { id: messageId } });
 
         if (!message) {
             return res.status(404).json({ error: "Message not found" });
         }
 
-        // Only sender can delete their message
-        if (message.senderId !== userId) {
+        if (message.senderId !== req.user.id) {
             return res.status(403).json({ error: "You can only delete your own messages" });
         }
 
-        // Delete message
-        await prisma.message.delete({
-            where: { id: messageId }
-        });
+        await prisma.message.delete({ where: { id: messageId } });
 
         res.json({ message: "Message deleted successfully" });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        next(err);
     }
 };

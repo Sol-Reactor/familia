@@ -1,96 +1,97 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pencil } from 'lucide-react';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
-import { Button } from '../ui/button';
-import { Input } from '../ui/input';
-import { Label } from '../ui/label';
-import { Textarea } from '../ui/textarea';
-import { useUpdateProfile } from '../../api/users';
 import toast from 'react-hot-toast';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
+import { Button } from '../ui/button';
+import { Textarea } from '../ui/textarea';
+import { FormField, FormAlert } from '../common/FormField';
+import { useUpdateProfile } from '../../api/users';
+import { getErrorMessage } from '../../lib/utils';
 
 export default function EditProfileModal({ user }) {
   const [open, setOpen] = useState(false);
-  const [formData, setFormData] = useState({
-    name: user?.name || '',
-    bio: user?.bio || '',
-  });
+  const [error, setError] = useState('');
+  const [formData, setFormData] = useState({ name: '', bio: '' });
 
   const updateProfile = useUpdateProfile();
 
+  // Re-sync the form with the latest profile every time the dialog opens
+  useEffect(() => {
+    if (open) {
+      setFormData({ name: user?.name || '', bio: user?.bio || '' });
+      setError('');
+    }
+  }, [open, user?.name, user?.bio]);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
+    const name = formData.name.trim();
+    if (name.length < 2) {
+      setError('Name must be at least 2 characters long');
+      return;
+    }
     try {
-      await updateProfile.mutateAsync(formData);
-      toast.success('Profile updated successfully!');
+      await updateProfile.mutateAsync({ name, bio: formData.bio.trim() });
+      toast.success('Profile updated');
       setOpen(false);
-    } catch (error) {
-      toast.error(error.response?.data?.error || 'Failed to update profile');
+    } catch (err) {
+      setError(getErrorMessage(err, 'Failed to update profile'));
     }
   };
 
   const handleChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value,
-    });
+    setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
   };
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="gap-2">
-          <Pencil className="h-4 w-4" />
-          Edit Profile
+        <Button variant="secondary">
+          <Pencil className="h-4 w-4" aria-hidden="true" />
+          Edit profile
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Edit Profile</DialogTitle>
+          <DialogTitle>Edit profile</DialogTitle>
           <DialogDescription>
-            Make changes to your profile information here
+            Update your name and bio. Photos and other details are in Settings.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="name">Name</Label>
-            <Input
-              id="name"
-              name="name"
-              value={formData.name}
-              onChange={handleChange}
-              placeholder="Your name"
-              minLength={2}
-              maxLength={15}
-              required
-            />
-          </div>
+          <FormAlert>{error}</FormAlert>
+          <FormField
+            label="Name"
+            id="edit-name"
+            name="name"
+            value={formData.name}
+            onChange={handleChange}
+            placeholder="Your name"
+            autoComplete="name"
+            minLength={2}
+            maxLength={50}
+            required
+          />
 
-          <div className="space-y-2">
-            <Label htmlFor="bio">Bio</Label>
+          <FormField label="Bio" id="edit-bio" hint={`${formData.bio.length}/200`}>
             <Textarea
-              id="bio"
               name="bio"
               value={formData.bio}
               onChange={handleChange}
-              placeholder="Tell us about yourself"
+              placeholder="Tell people a little about yourself"
               rows={4}
               maxLength={200}
             />
-          </div>
+          </FormField>
 
-          <div className="flex justify-end gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setOpen(false)}
-            >
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={updateProfile.isPending}>
-              {updateProfile.isPending ? 'Saving...' : 'Save Changes'}
+            <Button type="submit" loading={updateProfile.isPending}>
+              Save changes
             </Button>
-          </div>
+          </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
