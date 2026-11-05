@@ -78,9 +78,9 @@ export const useSendRequest = () => {
 
     return useMutation({
         mutationFn: sendFriendRequest,
-        onSuccess: () => {
-            // Only invalidate suggestions to remove the user we just sent a request to
+        onSuccess: (data, userId) => {
             queryClient.invalidateQueries({ queryKey: queryKeys.friends.suggestions });
+            queryClient.invalidateQueries({ queryKey: queryKeys.friends.status(userId) });
         },
     });
 };
@@ -111,7 +111,7 @@ export const useAcceptRequest = () => {
             queryClient.invalidateQueries({ queryKey: queryKeys.friends.requests });
             queryClient.invalidateQueries({ queryKey: queryKeys.posts.all });
             queryClient.invalidateQueries({ queryKey: queryKeys.friends.suggestions });
-            queryClient.invalidateQueries({ predicate: (q) => q.queryKey[0] === 'posts' });
+            queryClient.invalidateQueries({ queryKey: queryKeys.users.all });
             queryClient.invalidateQueries({ predicate: (q) => q.queryKey[0] === 'friends' && q.queryKey[1] === 'status' });
         },
     });
@@ -139,6 +139,8 @@ export const useRejectRequest = () => {
         },
         onSettled: () => {
             queryClient.invalidateQueries({ queryKey: queryKeys.friends.requests });
+            queryClient.invalidateQueries({ queryKey: queryKeys.friends.suggestions });
+            queryClient.invalidateQueries({ predicate: (q) => q.queryKey[0] === 'friends' && q.queryKey[1] === 'status' });
         },
     });
 };
@@ -148,8 +150,12 @@ export const useUnfriend = () => {
 
     return useMutation({
         mutationFn: unfriend,
-        onSuccess: () => {
+        onSuccess: (data, userId) => {
             queryClient.invalidateQueries({ queryKey: queryKeys.friends.all });
+            queryClient.invalidateQueries({ queryKey: queryKeys.friends.status(userId) });
+            queryClient.invalidateQueries({ queryKey: queryKeys.friends.suggestions });
+            queryClient.invalidateQueries({ queryKey: queryKeys.users.detail(userId) });
+            queryClient.invalidateQueries({ queryKey: queryKeys.posts.all });
         },
     });
 };

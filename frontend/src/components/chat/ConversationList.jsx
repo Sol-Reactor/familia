@@ -1,91 +1,76 @@
+import { formatDistanceToNowStrict } from 'date-fns';
 import { Avatar, AvatarImage, AvatarFallback } from '../ui/avatar';
-import { Badge } from '../ui/badge';
-import { Card } from '../ui/card';
-import { cn } from '../../lib/utils';
+import { cn, formatCount, getInitials } from '../../lib/utils';
 import { useChatStore } from '../../stores/chatStore';
-import { formatDistanceToNow } from 'date-fns';
+import { useAuthStore } from '../../stores/authStore';
 
 export default function ConversationList({ conversations, activeConversation, onSelectConversation }) {
   const unreadCounts = useChatStore((state) => state.unreadCounts);
   const onlineUsers = useChatStore((state) => state.onlineUsers);
-
-  const getInitials = (name) => {
-    if (!name) return 'U';
-    const parts = name.split(' ');
-    if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
-    return name.substring(0, 2).toUpperCase();
-  };
+  const typingUsers = useChatStore((state) => state.typingUsers);
+  const currentUserId = useAuthStore((state) => state.user?.id);
 
   return (
-    <div className="space-y-2">
+    <ul className="space-y-0.5 p-2" aria-label="Conversations">
       {conversations?.map((conv) => {
-        const otherUser = conv.otherUser;
-        const isOnline = onlineUsers.has(otherUser?.id);
-        const unreadCount = unreadCounts[otherUser?.id] || 0;
-        const isActive = activeConversation === otherUser?.id;
+        const otherUser = conv.otherUser || {};
+        const isOnline = onlineUsers.has(otherUser.id);
+        const unreadCount = unreadCounts[otherUser.id] || 0;
+        const isActive = activeConversation === otherUser.id;
+        const isTyping = typingUsers[otherUser.id];
+        const last = conv.lastMessage;
+        const prefix = last?.senderId === currentUserId ? 'You: ' : '';
 
         return (
-          <Card
-            key={conv.id}
-            className={cn(
-              'p-3.5 cursor-pointer transition-all duration-200 border-2',
-              isActive 
-                ? 'bg-gradient-to-r from-facebook-primary/10 to-blue-600/5 border-facebook-primary shadow-md' 
-                : 'hover:bg-gray-50 dark:hover:bg-gray-800 border-transparent hover:shadow-sm'
-            )}
-            onClick={() => onSelectConversation(otherUser?.id)}
-          >
-            <div className="flex items-center gap-3.5">
-              <div className="relative flex-shrink-0">
-                <Avatar className={cn(
-                  "h-14 w-14 ring-2 transition-all",
-                  isActive ? "ring-facebook-primary" : "ring-gray-200 dark:ring-gray-700"
-                )}>
-                  <AvatarImage src={otherUser?.avatarUrl} alt={otherUser?.name} />
-                  <AvatarFallback className="bg-gradient-to-br from-facebook-primary to-blue-600 text-white font-semibold">
-                    {getInitials(otherUser?.name)}
-                  </AvatarFallback>
+          <li key={conv.id}>
+            <button
+              type="button"
+              onClick={() => onSelectConversation(otherUser.id)}
+              aria-current={isActive ? 'true' : undefined}
+              className={cn(
+                'flex w-full items-center gap-3 rounded-xl p-2.5 text-left transition-colors duration-200',
+                isActive ? 'bg-primary/10' : 'hover:bg-accent'
+              )}
+            >
+              <div className="relative shrink-0">
+                <Avatar className="h-12 w-12">
+                  <AvatarImage src={otherUser.avatarUrl} alt="" />
+                  <AvatarFallback>{getInitials(otherUser.name)}</AvatarFallback>
                 </Avatar>
                 {isOnline && (
-                  <div className="absolute bottom-0 right-0 w-4 h-4 bg-green-500 rounded-full border-[3px] border-white dark:border-gray-900 shadow-sm" />
+                  <span className="absolute bottom-0 right-0 h-3.5 w-3.5 rounded-full border-2 border-card bg-green-500">
+                    <span className="sr-only">Online</span>
+                  </span>
                 )}
               </div>
 
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between mb-1">
-                  <h3 className={cn(
-                    'font-semibold truncate text-[15px]', 
-                    unreadCount > 0 ? 'text-facebook-primary' : 'text-gray-900 dark:text-gray-100'
-                  )}>
-                    {otherUser?.name || `${otherUser?.firstName} ${otherUser?.lastName}`}
-                  </h3>
-                  {unreadCount > 0 && (
-                    <Badge className="ml-2 bg-facebook-primary text-white px-2 py-0.5 text-xs font-bold">
-                      {unreadCount}
-                    </Badge>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className={cn('truncate text-[15px]', unreadCount > 0 ? 'font-bold' : 'font-semibold')}>
+                    {otherUser.name}
+                  </span>
+                  {last && (
+                    <time dateTime={last.createdAt} className={cn('shrink-0 text-xs', unreadCount > 0 ? 'font-semibold text-primary' : 'text-muted-foreground')}>
+                      {formatDistanceToNowStrict(new Date(last.createdAt))}
+                    </time>
                   )}
                 </div>
-                
-                {conv.lastMessage && (
-                  <div className="flex items-center justify-between gap-2">
-                    <p className={cn(
-                      "text-sm truncate flex-1",
-                      unreadCount > 0 
-                        ? "text-gray-700 dark:text-gray-300 font-medium" 
-                        : "text-gray-500 dark:text-gray-400"
-                    )}>
-                      {conv.lastMessage.content}
-                    </p>
-                    <span className="text-[11px] text-gray-400 flex-shrink-0">
-                      {formatDistanceToNow(new Date(conv.lastMessage.createdAt), { addSuffix: true })}
+                <div className="flex items-center justify-between gap-2">
+                  <p className={cn('truncate text-sm', unreadCount > 0 ? 'font-semibold text-foreground' : 'text-muted-foreground', isTyping && 'italic text-primary')}>
+                    {isTyping ? 'typing…' : last ? `${prefix}${last.content}` : 'Say hi!'}
+                  </p>
+                  {unreadCount > 0 && (
+                    <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-bold text-primary-foreground">
+                      {formatCount(unreadCount)}
+                      <span className="sr-only"> unread</span>
                     </span>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
-            </div>
-          </Card>
+            </button>
+          </li>
         );
       })}
-    </div>
+    </ul>
   );
 }

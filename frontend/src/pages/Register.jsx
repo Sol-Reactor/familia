@@ -1,9 +1,19 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '../components/ui/card';
-import { Input } from '../components/ui/input';
+import { Check, X } from 'lucide-react';
 import { Button } from '../components/ui/button';
+import { FormField, PasswordInput, FormAlert, getPasswordIssues } from '../components/common/FormField';
+import AuthLayout from '../components/layout/AuthLayout';
 import { useRegister } from '../api/auth';
+import { cn, getErrorMessage } from '../lib/utils';
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const RULES = [
+  { label: 'At least 8 characters', test: (p) => p.length >= 8 },
+  { label: 'Contains a letter', test: (p) => /[A-Za-z]/.test(p) },
+  { label: 'Contains a number', test: (p) => /\d/.test(p) },
+];
 
 export default function Register() {
   const [formData, setFormData] = useState({
@@ -12,154 +22,137 @@ export default function Register() {
     password: '',
     confirmPassword: '',
   });
+  const [fieldErrors, setFieldErrors] = useState({});
   const [error, setError] = useState('');
-  
+
   const register = useRegister();
 
   const handleChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value,
-    });
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+    if (fieldErrors[name]) setFieldErrors((prev) => ({ ...prev, [name]: undefined }));
+  };
+
+  const validate = () => {
+    const errors = {};
+    const name = formData.name.trim();
+    if (!name) errors.name = 'Name is required';
+    else if (name.length < 2 || name.length > 50) errors.name = 'Name must be between 2 and 50 characters';
+
+    if (!formData.email.trim()) errors.email = 'Email is required';
+    else if (!EMAIL_RE.test(formData.email.trim())) errors.email = 'Enter a valid email address';
+
+    const issues = getPasswordIssues(formData.password);
+    if (!formData.password) errors.password = 'Password is required';
+    else if (issues.length) errors.password = `Password needs ${issues.join(', ')}`;
+
+    if (!formData.confirmPassword) errors.confirmPassword = 'Please confirm your password';
+    else if (formData.password !== formData.confirmPassword) errors.confirmPassword = 'Passwords do not match';
+
+    setFieldErrors(errors);
+    return Object.keys(errors).length === 0;
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-
-    // Validation
-    if (!formData.name || !formData.email || !formData.password) {
-      setError('Please fill in all fields');
-      return;
-    }
-
-    if (formData.password !== formData.confirmPassword) {
-      setError('Passwords do not match');
-      return;
-    }
-
-    if (formData.password.length < 6) {
-      setError('Password must be at least 6 characters');
-      return;
-    }
-
-    if (formData.name.length < 2 || formData.name.length > 15) {
-      setError('Name must be between 2 and 15 characters');
-      return;
-    }
+    if (!validate()) return;
 
     try {
       await register.mutateAsync({
-        name: formData.name,
-        email: formData.email,
+        name: formData.name.trim(),
+        email: formData.email.trim(),
         password: formData.password,
         confirmPassword: formData.confirmPassword,
       });
     } catch (err) {
-      setError(err.response?.data?.message || 'Registration failed. Please try again.');
+      setError(getErrorMessage(err, 'Registration failed. Please try again.'));
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
-      <div className="w-full max-w-md">
-        <div className="text-center mb-8">
-          <h1 className="text-6xl font-bold text-facebook-primary mb-2">facebook</h1>
-          <p className="text-gray-700 text-lg">Create a new account</p>
-        </div>
+    <AuthLayout
+      title="Create your account"
+      subtitle="It's quick and easy."
+      footer={
+        <>
+          Already have an account?{' '}
+          <Link to="/login" className="font-semibold text-primary hover:underline">
+            Log in
+          </Link>
+        </>
+      }
+    >
+      <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+        <FormAlert type="error">{error}</FormAlert>
 
-        <Card className="shadow-2xl">
-          <CardHeader className="text-center">
-            <CardTitle>Sign Up</CardTitle>
-            <CardDescription>It's quick and easy</CardDescription>
-          </CardHeader>
+        <FormField
+          label="Full name"
+          id="name"
+          name="name"
+          autoComplete="name"
+          placeholder="Your name"
+          value={formData.name}
+          onChange={handleChange}
+          maxLength={50}
+          error={fieldErrors.name}
+          autoFocus
+        />
 
-          <form onSubmit={handleSubmit}>
-            <CardContent className="space-y-4">
-              {error && (
-                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
-                  {error}
-                </div>
-              )}
+        <FormField
+          label="Email"
+          id="email"
+          name="email"
+          type="email"
+          inputMode="email"
+          autoComplete="email"
+          placeholder="you@example.com"
+          value={formData.email}
+          onChange={handleChange}
+          error={fieldErrors.email}
+        />
 
-              <div className="space-y-2">
-                <label htmlFor="name" className="text-sm font-medium">
-                  Name
-                </label>
-                <Input
-                  id="name"
-                  name="name"
-                  type="text"
-                  placeholder="Your name (2-15 characters)"
-                  value={formData.name}
-                  onChange={handleChange}
-                  minLength={2}
-                  maxLength={15}
-                  required
-                />
-              </div>
+        <FormField label="Password" id="password" error={fieldErrors.password}>
+          <PasswordInput
+            name="password"
+            autoComplete="new-password"
+            placeholder="Create a password"
+            value={formData.password}
+            onChange={handleChange}
+            maxLength={72}
+          />
+        </FormField>
 
-              <div className="space-y-2">
-                <label htmlFor="email" className="text-sm font-medium">
-                  Email
-                </label>
-                <Input
-                  id="email"
-                  name="email"
-                  type="email"
-                  placeholder="Email address"
-                  value={formData.email}
-                  onChange={handleChange}
-                  required
-                />
-              </div>
+        {formData.password && (
+          <ul className="grid gap-1 text-xs sm:grid-cols-3" aria-label="Password requirements">
+            {RULES.map((rule) => {
+              const ok = rule.test(formData.password);
+              return (
+                <li key={rule.label} className={cn('flex items-center gap-1', ok ? 'text-success' : 'text-muted-foreground')}>
+                  {ok ? <Check className="h-3.5 w-3.5" aria-hidden="true" /> : <X className="h-3.5 w-3.5" aria-hidden="true" />}
+                  <span>{rule.label}</span>
+                  <span className="sr-only">{ok ? '(met)' : '(not met)'}</span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
 
-              <div className="space-y-2">
-                <label htmlFor="password" className="text-sm font-medium">
-                  Password
-                </label>
-                <Input
-                  id="password"
-                  name="password"
-                  type="password"
-                  placeholder="New password"
-                  value={formData.password}
-                  onChange={handleChange}
-                  required
-                />
-              </div>
+        <FormField label="Confirm password" id="confirmPassword" error={fieldErrors.confirmPassword}>
+          <PasswordInput
+            name="confirmPassword"
+            autoComplete="new-password"
+            placeholder="Repeat your password"
+            value={formData.confirmPassword}
+            onChange={handleChange}
+            maxLength={72}
+          />
+        </FormField>
 
-              <div className="space-y-2">
-                <label htmlFor="confirmPassword" className="text-sm font-medium">
-                  Confirm Password
-                </label>
-                <Input
-                  id="confirmPassword"
-                  name="confirmPassword"
-                  type="password"
-                  placeholder="Confirm password"
-                  value={formData.confirmPassword}
-                  onChange={handleChange}
-                  required
-                />
-              </div>
-            </CardContent>
-
-            <CardFooter className="flex flex-col gap-4">
-              <Button type="submit" className="w-full" disabled={register.isPending}>
-                {register.isPending ? 'Creating account...' : 'Sign Up'}
-              </Button>
-
-              <div className="text-center text-sm">
-                Already have an account?{' '}
-                <Link to="/login" className="text-facebook-primary font-medium hover:underline">
-                  Log in
-                </Link>
-              </div>
-            </CardFooter>
-          </form>
-        </Card>
-      </div>
-    </div>
+        <Button type="submit" size="lg" variant="brand" className="w-full" loading={register.isPending}>
+          {register.isPending ? 'Creating account…' : 'Sign up'}
+        </Button>
+      </form>
+    </AuthLayout>
   );
 }

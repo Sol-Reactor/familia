@@ -1,146 +1,269 @@
-import { useParams } from 'react-router-dom';
+import { useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { useInView } from 'react-intersection-observer';
+import { format } from 'date-fns';
+import toast from 'react-hot-toast';
+import { UserPlus, UserCheck, UserX, MessageCircle, Clock, MapPin, Link as LinkIcon, CalendarDays, Lock, UserRoundX, Check, X } from 'lucide-react';
 import MainLayout from '../components/layout/MainLayout';
 import { Card } from '../components/ui/card';
 import { Avatar, AvatarImage, AvatarFallback } from '../components/ui/avatar';
 import { Button } from '../components/ui/button';
-import { useFriendshipStatus, useSendRequest, useUnfriend } from '../api/friends';
-import { UserPlus, UserCheck, UserX } from 'lucide-react';
-import { useAuthStore } from '../stores/authStore';
 import PostCard from '../components/feed/PostCard';
+import CreatePost from '../components/feed/CreatePost';
+import EditProfileModal from '../components/profile/EditProfileModal';
+import EmptyState from '../components/common/EmptyState';
+import { Skeleton, PostSkeleton } from '../components/common/Skeleton';
+import { useFriendshipStatus, useSendRequest, useUnfriend, useAcceptRequest, useRejectRequest } from '../api/friends';
 import { useInfinitePosts } from '../api/posts';
 import { useUser } from '../api/users';
-import EditProfileModal from '../components/profile/EditProfileModal';
+import { useAuthStore } from '../stores/authStore';
+import { useChatStore } from '../stores/chatStore';
+import { getErrorMessage, getInitials, safeExternalUrl } from '../lib/utils';
+
+function FriendActions({ userId, name, status }) {
+  const navigate = useNavigate();
+  const setActiveConversation = useChatStore((s) => s.setActiveConversation);
+  const sendRequest = useSendRequest();
+  const unfriend = useUnfriend();
+  const acceptRequest = useAcceptRequest();
+  const rejectRequest = useRejectRequest();
+
+  const onError = (fallback) => (err) => toast.error(getErrorMessage(err, fallback));
+
+  if (!status) return null;
+
+  if (status.status === 'accepted') {
+    return (
+      <>
+        <Button
+          onClick={() => {
+            setActiveConversation(userId);
+            navigate('/messages');
+          }}
+        >
+          <MessageCircle className="h-4 w-4" aria-hidden="true" /> Message
+        </Button>
+        <Button
+          variant="outline"
+          loading={unfriend.isPending}
+          onClick={() => {
+            if (window.confirm(`Remove ${name} from your friends?`)) {
+              unfriend.mutate(userId, { onError: onError('Failed to unfriend') });
+            }
+          }}
+        >
+          <UserX className="h-4 w-4" aria-hidden="true" /> Unfriend
+        </Button>
+      </>
+    );
+  }
+
+  if (status.status === 'pending' && status.isReceived) {
+    return (
+      <>
+        <Button
+          loading={acceptRequest.isPending}
+          onClick={() => acceptRequest.mutate(status.id, {
+            onSuccess: () => toast.success(`You and ${name} are now friends`),
+            onError: onError('Failed to accept request'),
+          })}
+        >
+          <Check className="h-4 w-4" aria-hidden="true" /> Confirm request
+        </Button>
+        <Button
+          variant="outline"
+          loading={rejectRequest.isPending}
+          onClick={() => rejectRequest.mutate(status.id, { onError: onError('Failed to decline request') })}
+        >
+          <X className="h-4 w-4" aria-hidden="true" /> Decline
+        </Button>
+      </>
+    );
+  }
+
+  if (status.status === 'pending') {
+    return (
+      <Button
+        variant="outline"
+        loading={unfriend.isPending}
+        onClick={() => unfriend.mutate(userId, {
+          onSuccess: () => toast.success('Friend request cancelled'),
+          onError: onError('Failed to cancel request'),
+        })}
+      >
+        <Clock className="h-4 w-4" aria-hidden="true" /> Cancel request
+      </Button>
+    );
+  }
+
+  return (
+    <Button
+      loading={sendRequest.isPending}
+      onClick={() => sendRequest.mutate(userId, {
+        onSuccess: () => toast.success(`Friend request sent to ${name}`),
+        onError: onError('Failed to send friend request'),
+      })}
+    >
+      <UserPlus className="h-4 w-4" aria-hidden="true" /> Add friend
+    </Button>
+  );
+}
 
 export default function Profile() {
   const { id } = useParams();
   const currentUser = useAuthStore((state) => state.user);
   const isOwnProfile = currentUser?.id === id;
 
-  const { data: user, isLoading } = useUser(id);
-  const { data: friendshipStatus } = useFriendshipStatus(id);
-  const sendRequest = useSendRequest();
-  const unfriend = useUnfriend();
-  const { data: postsData } = useInfinitePosts();
+  const { data: user, isLoading, isError: userError, error: userErrorObj, refetch: refetchUser } = useUser(id);
+  const { data: friendshipStatus } = useFriendshipStatus(isOwnProfile ? null : id);
+  const isFriend = friendshipStatus?.status === 'accepted';
+  const canSeePosts = isOwnProfile || isFriend;
 
-  const getInitials = (name) => {
-    if (!name) return 'U';
-    const parts = name.split(' ');
-    if (parts.length >= 2) {
-      return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
-    }
-    return name.substring(0, 2).toUpperCase();
-  };
+  const {
+    data: postsData,
+    isLoading: postsLoading,
+    hasNextPage,
+    fetchNextPage,
+    isFetchingNextPage,
+  } = useInfinitePosts({ userId: id, enabled: Boolean(id) && canSeePosts });
 
-  const handleFriendAction = () => {
-    if (friendshipStatus?.status === null) {
-      sendRequest.mutate(id);
-    } else if (friendshipStatus?.status === 'accepted') {
-      if (window.confirm(`Unfriend ${user?.name}?`)) {
-        unfriend.mutate(id);
-      }
-    }
-  };
+  const { ref, inView } = useInView({ rootMargin: '400px' });
+  useEffect(() => {
+    if (inView && hasNextPage && !isFetchingNextPage) fetchNextPage();
+  }, [inView, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
-  const userPosts = postsData?.pages.flatMap(page => 
-    page.posts.filter(post => post.author.id === id)
-  ) || [];
-
-  // Calculate friends count from backend _count fields
-  const friendsCount = user?._count 
-    ? (user._count.friendships1 || 0) + (user._count.friendships2 || 0)
-    : 0;
+  const profile = isOwnProfile ? { ...user, ...currentUser, friendsCount: user?.friendsCount } : user;
+  const userPosts = postsData?.pages.flatMap((page) => page.posts || []) || [];
+  const website = safeExternalUrl(profile?.website);
 
   if (isLoading) {
     return (
-      <MainLayout>
-        <div className="text-center py-8">
-          <p className="text-gray-500">Loading profile...</p>
-        </div>
+      <MainLayout title="Profile">
+        <Card className="overflow-hidden">
+          <Skeleton className="h-40 w-full rounded-none sm:h-64" />
+          <div className="flex flex-col items-center gap-3 p-6">
+            <Skeleton className="-mt-20 h-32 w-32 rounded-full border-4 border-card" />
+            <Skeleton className="h-6 w-48" />
+            <Skeleton className="h-4 w-24" />
+          </div>
+        </Card>
       </MainLayout>
     );
   }
 
+  if (userError || !user) {
+    return (
+      <MainLayout title="Profile">
+        <Card>
+          {userErrorObj?.response?.status === 404 || !userError ? (
+            <EmptyState icon={UserRoundX} title="This profile isn't available" description="The link may be broken, or the account was deleted." />
+          ) : (
+            <EmptyState
+              icon={UserRoundX}
+              title="Couldn't load this profile"
+              description={getErrorMessage(userErrorObj)}
+              action={<Button onClick={() => refetchUser()}>Try again</Button>}
+            />
+          )}
+        </Card>
+      </MainLayout>
+    );
+  }
+
+  const joined = profile?.createdAt ? format(new Date(profile.createdAt), 'MMMM yyyy') : null;
+
   return (
-    <MainLayout>
+    <MainLayout title={profile?.name}>
       <div className="space-y-4">
-        {/* Cover Photo & Profile Picture */}
         <Card className="overflow-hidden">
-          {/* Cover Photo Section */}
-          <div className="relative h-48 sm:h-80 bg-gradient-to-r from-facebook-primary to-blue-600">
-            {user?.coverUrl && (
-              <img
-                src={user.coverUrl}
-                alt="Cover"
-                className="absolute inset-0 w-full h-full object-cover"
-              />
+          <div className="relative h-40 brand-gradient sm:h-64">
+            {profile?.coverUrl && (
+              <img src={profile.coverUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
             )}
           </div>
-          
-          {/* Profile Info Section */}
-          <div className="px-4 sm:px-6 pb-6">
-            <div className="flex flex-col sm:flex-row items-center sm:items-end gap-4 -mt-16 sm:-mt-20">
-              {/* Profile Picture */}
-              <Avatar className="h-32 w-32 sm:h-40 sm:w-40 border-4 border-white shadow-lg">
-                <AvatarImage src={user?.avatarUrl} alt={user?.name} />
-                <AvatarFallback className="text-3xl sm:text-4xl">
-                  {getInitials(user?.name)}
-                </AvatarFallback>
+
+          <div className="px-4 pb-6 sm:px-6">
+            <div className="-mt-16 flex flex-col items-center gap-4 sm:-mt-14 sm:flex-row sm:items-end">
+              <Avatar className="h-32 w-32 border-4 border-card shadow-lg sm:h-36 sm:w-36">
+                <AvatarImage src={profile?.avatarUrl} alt={`${profile?.name}'s profile picture`} />
+                <AvatarFallback className="text-4xl">{getInitials(profile?.name)}</AvatarFallback>
               </Avatar>
 
-              {/* User Info */}
-              <div className="flex-1 text-center sm:text-left sm:mt-6">
-                <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">
-                  {user?.name}
-                </h1>
-                {user?.bio && (
-                  <p className="text-gray-600 mt-1">{user.bio}</p>
-                )}
-                <p className="text-gray-500 mt-1">
-                  {friendsCount} friends
+              <div className="min-w-0 flex-1 text-center sm:pb-2 sm:text-left">
+                <h1 className="break-words text-2xl font-extrabold tracking-tight sm:text-3xl">{profile?.name}</h1>
+                {profile?.username && <p className="text-sm text-muted-foreground">@{profile.username}</p>}
+                <p className="mt-1 text-sm font-semibold text-muted-foreground">
+                  {profile?.friendsCount ?? 0} {profile?.friendsCount === 1 ? 'friend' : 'friends'}
                 </p>
               </div>
 
-              <div className="flex gap-2">
+              <div className="flex flex-wrap justify-center gap-2 sm:pb-2">
                 {isOwnProfile ? (
-                  <EditProfileModal user={user} />
+                  <EditProfileModal user={profile} />
                 ) : (
-                  <>
-                    {friendshipStatus?.status === null && (
-                      <Button onClick={handleFriendAction}>
-                        <UserPlus className="h-4 w-4 mr-2" />
-                        Add Friend
-                      </Button>
-                    )}
-                    {friendshipStatus?.status === 'pending' && (
-                      <Button variant="outline" disabled>
-                        <UserCheck className="h-4 w-4 mr-2" />
-                        Request Sent
-                      </Button>
-                    )}
-                    {friendshipStatus?.status === 'accepted' && (
-                      <Button variant="outline" onClick={handleFriendAction}>
-                        <UserX className="h-4 w-4 mr-2" />
-                        Unfriend
-                      </Button>
-                    )}
-                  </>
+                  <FriendActions userId={id} name={profile?.name} status={friendshipStatus} />
                 )}
               </div>
             </div>
+
+            {(profile?.bio || profile?.location || website || joined) && (
+              <div className="mt-6 space-y-2 border-t pt-4">
+                {profile?.bio && <p className="whitespace-pre-wrap break-words">{profile.bio}</p>}
+                <ul className="flex flex-wrap gap-x-5 gap-y-2 text-sm text-muted-foreground">
+                  {profile?.location && (
+                    <li className="flex items-center gap-1.5">
+                      <MapPin className="h-4 w-4" aria-hidden="true" /> {profile.location}
+                    </li>
+                  )}
+                  {website && (
+                    <li className="flex min-w-0 items-center gap-1.5">
+                      <LinkIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                      <a href={website} target="_blank" rel="noopener noreferrer nofollow" className="truncate font-medium text-primary hover:underline">
+                        {website.replace(/^https?:\/\//, '').replace(/\/$/, '')}
+                      </a>
+                    </li>
+                  )}
+                  {joined && (
+                    <li className="flex items-center gap-1.5">
+                      <CalendarDays className="h-4 w-4" aria-hidden="true" /> Joined {joined}
+                    </li>
+                  )}
+                </ul>
+              </div>
+            )}
           </div>
         </Card>
 
-        {/* Posts */}
-        <div className="space-y-4">
-          <h2 className="text-2xl font-bold">Posts</h2>
-          {userPosts.length > 0 ? (
-            userPosts.map((post) => <PostCard key={post.id} post={post} />)
+        <section aria-labelledby="posts-heading" className="space-y-4">
+          <h2 id="posts-heading" className="px-1 text-lg font-bold">Posts</h2>
+
+          {isOwnProfile && <CreatePost />}
+
+          {!canSeePosts ? (
+            <Card>
+              <EmptyState
+                icon={Lock}
+                title={`${profile?.name?.split(' ')[0] || 'Their'}'s posts are for friends`}
+                description="Send a friend request to see what they share."
+              />
+            </Card>
+          ) : postsLoading ? (
+            <PostSkeleton />
+          ) : userPosts.length > 0 ? (
+            <>
+              {userPosts.map((post) => <PostCard key={post.id} post={post} />)}
+              {hasNextPage && <div ref={ref}>{isFetchingNextPage && <PostSkeleton />}</div>}
+            </>
           ) : (
-            <Card className="p-8 text-center">
-              <p className="text-gray-500">No posts yet</p>
+            <Card>
+              <EmptyState
+                icon={UserCheck}
+                title="No posts yet"
+                description={isOwnProfile ? 'Share something with your friends!' : `${profile?.name} hasn't posted anything yet.`}
+              />
             </Card>
           )}
-        </div>
+        </section>
       </div>
     </MainLayout>
   );

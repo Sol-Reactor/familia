@@ -11,7 +11,8 @@ import { authenticate } from "../middleware/auth.js";
 import { validateRequest } from "../middleware/validation.js";
 import {
     updateProfileSchema,
-    updatePasswordSchema
+    updatePasswordSchema,
+    deleteAccountSchema
 } from "../validations/user.validation.js";
 import { uploadProfileImage, handleUploadError } from "../middleware/upload.middleware.js";
 
@@ -34,7 +35,7 @@ router.put("/me/password",
     validateRequest(updatePasswordSchema),
     updatePassword
 );
-router.delete("/me/account", authenticate, deleteMyAccount);
+router.delete("/me/account", authenticate, validateRequest(deleteAccountSchema), deleteMyAccount);
 
 // Public routes (with authentication to see who's logged in)
 router.get("/", authenticate, getUsers);

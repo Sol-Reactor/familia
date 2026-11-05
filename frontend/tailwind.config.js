@@ -2,9 +2,7 @@
 export default {
     darkMode: ["class"],
     content: [
-        './pages/**/*.{js,jsx}',
-        './components/**/*.{js,jsx}',
-        './app/**/*.{js,jsx}',
+        './index.html',
         './src/**/*.{js,jsx}',
     ],
     prefix: "",
@@ -17,12 +15,25 @@ export default {
             },
         },
         extend: {
+            fontFamily: {
+                sans: ['"Plus Jakarta Sans"', 'ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'],
+            },
+            // Single z-index scale used across the app
+            zIndex: {
+                dropdown: "30",
+                sticky: "40",
+                nav: "50",
+                overlay: "60",
+                modal: "70",
+                toast: "80",
+            },
             colors: {
                 border: "hsl(var(--border))",
                 input: "hsl(var(--input))",
                 ring: "hsl(var(--ring))",
                 background: "hsl(var(--background))",
                 foreground: "hsl(var(--foreground))",
+                surface: "hsl(var(--surface))",
                 primary: {
                     DEFAULT: "hsl(var(--primary))",
                     foreground: "hsl(var(--primary-foreground))",
@@ -34,6 +45,10 @@ export default {
                 destructive: {
                     DEFAULT: "hsl(var(--destructive))",
                     foreground: "hsl(var(--destructive-foreground))",
+                },
+                success: {
+                    DEFAULT: "hsl(var(--success))",
+                    foreground: "hsl(var(--success-foreground))",
                 },
                 muted: {
                     DEFAULT: "hsl(var(--muted))",
@@ -51,17 +66,23 @@ export default {
                     DEFAULT: "hsl(var(--card))",
                     foreground: "hsl(var(--card-foreground))",
                 },
+                // Kept for backwards compatibility with existing class names
                 facebook: {
-                    primary: "#1877f2",
+                    primary: "hsl(var(--primary))",
                     secondary: "#42b72a",
                     dark: "#18191a",
                     light: "#f0f2f5",
                 },
             },
             borderRadius: {
+                xl: "calc(var(--radius) + 4px)",
                 lg: "var(--radius)",
                 md: "calc(var(--radius) - 2px)",
                 sm: "calc(var(--radius) - 4px)",
+            },
+            boxShadow: {
+                card: "0 1px 2px 0 rgb(15 23 42 / 0.06), 0 1px 3px 0 rgb(15 23 42 / 0.08)",
+                pop: "0 10px 30px -10px rgb(15 23 42 / 0.25)",
             },
             keyframes: {
                 "accordion-down": {
@@ -72,10 +93,15 @@ export default {
                     from: { height: "var(--radix-accordion-content-height)" },
                     to: { height: "0" },
                 },
+                "gradient-x": {
+                    "0%, 100%": { backgroundPosition: "0% 50%" },
+                    "50%": { backgroundPosition: "100% 50%" },
+                },
             },
             animation: {
                 "accordion-down": "accordion-down 0.2s ease-out",
                 "accordion-up": "accordion-up 0.2s ease-out",
+                "gradient-x": "gradient-x 8s ease infinite",
             },
         },
     },

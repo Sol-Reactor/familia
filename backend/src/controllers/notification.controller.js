@@ -1,175 +1,120 @@
 import prisma from "../prisma.js";
+import { sendNotificationToUser } from "../config/socket.js";
+import { toInt } from "../utils/query.js";
+
+const senderSelect = {
+    select: {
+        id: true,
+        name: true,
+        avatarUrl: true,
+    },
+};
 
 // Get all notifications for current user
-export const getNotifications = async (req, res) => {
+export const getNotifications = async (req, res, next) => {
     try {
         const userId = req.user.id;
-        const { limit = 20, skip = 0, unreadOnly = false } = req.query;
+        const limit = toInt(req.query.limit, 20, { min: 1, max: 100 });
+        const skip = toInt(req.query.skip, 0, { min: 0, max: 10000 });
+        const unreadOnly = req.query.unreadOnly === "true";
 
-        const notifications = await prisma.notification.findMany({
-            where: {
-                userId,
-                ...(unreadOnly === 'true' && { read: false })
-            },
-            include: {
-                sender: {
-                    select: {
-                        id: true,
-                        name: true,
-                        avatarUrl: true
-                    }
-                }
-            },
-            take: parseInt(limit),
-            skip: parseInt(skip),
-            orderBy: {
-                createdAt: 'desc'
-            }
-        });
+        const [notifications, unreadCount] = await Promise.all([
+            prisma.notification.findMany({
+                where: {
+                    userId,
+                    ...(unreadOnly && { read: false }),
+                },
+                include: { sender: senderSelect },
+                take: limit,
+                skip,
+                orderBy: { createdAt: "desc" },
+            }),
+            prisma.notification.count({
+                where: { userId, read: false, NOT: { type: "message" } },
+            }),
+        ]);
 
-        // Get unread count
-        const unreadCount = await prisma.notification.count({
-            where: {
-                userId,
-                read: false
-            }
-        });
-
-        res.json({
-            notifications,
-            unreadCount
-        });
+        res.json({ notifications, unreadCount });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        next(err);
     }
 };
 
-// Mark notification as read
-export const markAsRead = async (req, res) => {
+// Mark notification as read (scoped to the owner - no existence leak for other users' ids)
+export const markAsRead = async (req, res, next) => {
     try {
         const { notificationId } = req.params;
-        const userId = req.user.id;
-
-        // Find notification
-        const notification = await prisma.notification.findUnique({
-            where: { id: notificationId }
+        const result = await prisma.notification.updateMany({
+            where: { id: notificationId, userId: req.user.id },
+            data: { read: true },
         });
 
-        if (!notification) {
+        if (result.count === 0) {
             return res.status(404).json({ error: "Notification not found" });
         }
 
-        // Check if notification belongs to user
-        if (notification.userId !== userId) {
-            return res.status(403).json({ error: "This notification doesn't belong to you" });
-        }
-
-        // Update to read
-        const updatedNotification = await prisma.notification.update({
-            where: { id: notificationId },
-            data: { read: true }
-        });
-
-        res.json(updatedNotification);
+        res.json({ id: notificationId, read: true });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        next(err);
     }
 };
 
 // Mark all notifications as read
-export const markAllAsRead = async (req, res) => {
+export const markAllAsRead = async (req, res, next) => {
     try {
-        const userId = req.user.id;
-
         await prisma.notification.updateMany({
-            where: {
-                userId,
-                read: false
-            },
-            data: {
-                read: true
-            }
+            where: { userId: req.user.id, read: false },
+            data: { read: true },
         });
 
         res.json({ message: "All notifications marked as read" });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        next(err);
     }
 };
 
 // Delete notification
-export const deleteNotification = async (req, res) => {
+export const deleteNotification = async (req, res, next) => {
     try {
         const { notificationId } = req.params;
-        const userId = req.user.id;
-
-        // Find notification
-        const notification = await prisma.notification.findUnique({
-            where: { id: notificationId }
+        const result = await prisma.notification.deleteMany({
+            where: { id: notificationId, userId: req.user.id },
         });
 
-        if (!notification) {
+        if (result.count === 0) {
             return res.status(404).json({ error: "Notification not found" });
         }
 
-        // Check if notification belongs to user
-        if (notification.userId !== userId) {
-            return res.status(403).json({ error: "This notification doesn't belong to you" });
-        }
-
-        // Delete notification
-        await prisma.notification.delete({
-            where: { id: notificationId }
-        });
-
         res.json({ message: "Notification deleted successfully" });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        next(err);
     }
 };
 
 // Clear all notifications
-export const clearAllNotifications = async (req, res) => {
+export const clearAllNotifications = async (req, res, next) => {
     try {
-        const userId = req.user.id;
-
-        await prisma.notification.deleteMany({
-            where: { userId }
-        });
-
+        await prisma.notification.deleteMany({ where: { userId: req.user.id } });
         res.json({ message: "All notifications cleared" });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        next(err);
     }
 };
 
-// Helper function to create notification (can be called from other controllers)
-export const createNotification = async ({
-    userId,
-    senderId,
-    postId,
-    type,
-    content
-}) => {
+/**
+ * Create a notification AND push it to the recipient in real time.
+ * Safe to call from any controller - failures are logged, never thrown.
+ */
+export const createNotification = async ({ userId, senderId, postId, type, content }) => {
     try {
+        if (!userId || userId === senderId) return null; // never notify yourself
+
         const notification = await prisma.notification.create({
-            data: {
-                userId,
-                senderId,
-                postId,
-                type,
-                content
-            },
-            include: {
-                sender: {
-                    select: {
-                        id: true,
-                        name: true,
-                        avatarUrl: true
-                    }
-                }
-            }
+            data: { userId, senderId, postId, type, content },
+            include: { sender: senderSelect },
         });
+
+        sendNotificationToUser(userId, notification);
         return notification;
     } catch (err) {
         console.error("Error creating notification:", err);
